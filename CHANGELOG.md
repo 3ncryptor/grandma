@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+- New mascot art, rebuilt from a high-resolution source, and now with a **transparent
+  background** instead of a baked-in one. The README header reads correctly in GitHub light
+  and dark with no `<picture>` element and no second file, because there is no background to
+  match. The terminal splash blends into your own colour scheme rather than stamping a black
+  square on a light terminal. Same filenames and dimensions, so nothing else changes.
+- `grandma knit`: the sharing phase, first cut. `knit share <sweater> <project>` packages your
+  memory of one project, strips the personal scope out of it, shows you the exact payload, and
+  (only after you say yes) pushes it to a private `grandma-knit-<project>` repo under your own
+  GitHub, inviting the teammates you name. On their side, the invitation shows up as one line at
+  launch, and `grandma knit pull` accepts it and turns the share into a normal memory proposal
+  they review with `grandma review`. Nothing merges by itself. No GitHub, or no `gh`? `--file`
+  writes the same bundle to disk and `knit pull --file` reads it back. The launch check reads a
+  cache refreshed by a detached, lock-guarded, time-capped poll, so it never waits on the
+  network and a failed call never reads as "nothing waiting". Opt out with
+  `GRANDMA_NO_KNIT_CHECK=1`; tune with `GRANDMA_KNIT_POLL_HOURS`.
+- `grandma knit contacts`: a local address book, so you share with `--to Priyansh` instead of
+  remembering a GitHub handle. The first share with someone offers to save them under a name
+  you choose. Lives under the git-ignored `.knit/`, so it is convenience state and never
+  becomes memory. The handle is what an invite needs (GitHub's collaborator API takes a
+  username, not an address). `--to` also accepts an email: one saved against a contact
+  resolves from your own book, and an unseen one is looked up on GitHub, which only matches
+  addresses people have made public on their profile. A miss explains why and how to fix it.
+- Fixed: `grandma knit pull` also picks up a share repo you already have access to, not only
+  ones with a pending invitation. The invitation email has an Accept button, and clicking it
+  consumes the invitation, so the previous behaviour was to find nothing and say nothing
+  about why.
+- Fixed: someone who was just shared with is told on the launch they are looking at, not the
+  next one. The invitation check is backgrounded, so the cache was written after the banner
+  had been read. The very first check on a machine now runs in the foreground under a tight
+  cap (`GRANDMA_KNIT_FIRST_POLL_TIMEOUT`, default 5s, fails open); every later one is
+  backgrounded as before.
+- `grandma knit` walks you through the GitHub CLI instead of failing at it. A missing `gh`
+  now explains why knit needs GitHub at all (your own private repo, no grandma server), names
+  the install command for your machine, and offers to run it. A logged-out `gh` offers to sign
+  you in. Both ask first, only on a terminal, and always leave the no-GitHub `--file` route
+  in view.
+- A knit invite now grants read access rather than write. A recipient only ever clones and
+  fetches, and `knit pull` no longer treats your own share repo as an inbox, so nothing
+  sitting in it can arrive in your review queue attributed to someone else.
+- A knit share repo is named for the sweater as well as the project, so two sweaters that each
+  have a project called `api` no longer share into the same repo. Previously the second
+  share overwrote the first and its recipients received the wrong sweater's memory.
+- The share footer now says how many terms were actually matched, and points at
+  `denylist.txt` when the answer is only your own name. It read as "this was scrubbed"
+  when the default denylist is empty.
+- Absolute home paths are rewritten to `~` before the line filter rather than after, so the
+  rewrite still happens when your OS username matches the name in your identity file.
+- Desktop notifications now say what to run. A macOS notification sent through `osascript` is
+  attributed to Script Editor and has no click action at all, so clicking one opened an empty
+  Script Editor window. The command is now in the notification body, and when
+  `terminal-notifier` is installed it is used instead, because that one really can run
+  something on click.
+- `grandma knit` sends a desktop notification the moment a share turns up, as well as the
+  line at launch, so you hear about it without opening grandma first. Once per share, not
+  once per check.
+- `grandma knit install-agent`: an opt-in background check every 60 seconds, so a share
+  reaches you within a minute instead of waiting for your next `grandma` launch. It uses a
+  conditional request, and GitHub does not bill a `304 Not Modified`, so the steady state
+  costs no rate limit and does no work. A tick takes a lock so ticks can never stack, caps
+  its own network call, and notifies once per share. `uninstall-agent` removes it.
 - Fixed: only a real sweater can be loaded. Any top-level directory in the memory home used to
   resolve as one, so `grandma proposals` assembled every sweater's pending proposals into a
   single session. Resolution now goes through `list_scopes`, in both the launcher and
@@ -19,7 +79,6 @@
   subcommand (it would be shadowed and never launch) or a folder grandma owns in your memory
   home (loading it would assemble whatever is inside). A folder that exists but carries no
   `scope:` frontmatter now says so instead of offering to knit over it.
-
 - `grandma watch`: tool-usage lens. Metrics now count calls per tool name, not just the
   total, so `grandma watch status` shows your top tools live and the final report can
   reason about the mix. Mechanical (python over the transcript), no model call.

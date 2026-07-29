@@ -183,7 +183,7 @@ Eight recipes with real transcripts in [docs/use-cases.md](docs/use-cases.md):
 
 ## Trust
 
-- **12 tested invariants** guard the core promise: loading sweater X injects exactly global + X and nothing else, the engine contains no sweater jargon and no personal data, no secrets in memory, hooks cannot recurse or run away. The suite gates every commit and runs in CI on macOS and Linux.
+- **15 tested invariants** guard the core promise: loading sweater X injects exactly global + X and nothing else, only a real sweater can be loaded at all, the engine contains no sweater jargon and no personal data, no secrets in memory, hooks cannot recurse or run away, and a shared memory cannot leave without being stripped and shown to you. The suite gates every commit and runs in CI on macOS and Linux.
 - **No telemetry, no server, no accounts.** Your memory never leaves your machine.
 - Failure modes are documented, not hidden: [docs/architecture.md](docs/architecture.md) includes the war stories, like the day a hook recursion produced 4,718 files before the circuit breaker existed.
 
@@ -200,7 +200,10 @@ grandma ingest [sweater]         catalog an existing folder of projects
 grandma watch ...              analysis campaigns over your sessions
 grandma test [sweater]           verify the integrity invariants
 grandma completions bash|zsh|fish print the shell tab-completion script
-grandma knit                   coming next: share a project's memory with a teammate (see below)
+grandma knit share <sweater> <project> --to <who>   share a project's memory
+grandma knit pull                pull a teammate's shared memory in for review
+grandma knit contacts            the people you share with, by name
+grandma knit install-agent       check for shares every 60s (opt-in)
 ```
 
 ## Known quirks (v0.1)
@@ -209,7 +212,10 @@ grandma knit                   coming next: share a project's memory with a team
   hooks (upstream issue), so the end-of-session distill only runs on Ctrl+D. Manual
   fallback always works: `grandma save <sweater>`.
 - Sweater names that collide with subcommands (`init`, `save`, `review`, `search`,
-  `ingest`, `watch`, `test`, `doctor`, `update`, `version`, `help`) are reserved.
+  `ingest`, `watch`, `knit`, `test`, `doctor`, `completions`, `update`, `version`, `help`) are
+  reserved, as are the folders grandma owns in your memory home (`global`, `proposals`,
+  `watches`, `templates`). Grandma refuses those names when you knit a sweater rather than
+  letting you make one it could never load.
 - macOS is the daily-driven platform. Linux is CI-tested but younger: if something
   misbehaves, `grandma doctor` first, then an issue with its output.
 
@@ -222,26 +228,72 @@ Grandma is being built in three phases, and you are looking at the first two.
 2. **Watch** (shipped). She analyzes how you actually work: `grandma watch` measures
    your sessions, reads the substantial ones, and reports the patterns behind your
    long sessions and wasted tokens.
-3. **Knit** (next). The sharing phase. Two people work the same project, and each one
-   builds their own memory of it locally: the sharp edges, the decisions, the things
-   that only bite you once. Knit lets you trade those. You run
+3. **Knit** (v1 shipped). The sharing phase. Two people work the same project, and each
+   one builds their own memory of it locally: the sharp edges, the decisions, the things
+   that only bite you once. Knit lets you trade those.
 
    ```sh
-   grandma knit share <sweater>
+   grandma knit share home-ops yard --to their-github-handle
    ```
 
-   and your project memory, personal scope stripped out, goes to your teammate. They
-   get a ping, pull it with grandma, and see it laid against their own: a diff between
-   your memory and theirs, so each side keeps what it wants. Think git, but for the
-   context in your heads instead of the code on disk. Remember builds your memory.
-   Watch sharpens it. Knit reconciles yours with a teammate's. It is early and open
-   for design: how the two memories merge when they disagree, what gets shared versus
-   kept private, how a note's origin is tracked. Contributions and design ideas for
-   knit are welcome: open an issue with the `knit` label.
+   That takes your memory of one project, strips the personal scope out of it, prints
+   the exact payload for you to read, and asks before anything moves. Say yes and it
+   lands in a private `grandma-knit-yard` repo under your own GitHub, with your teammate
+   invited to it. GitHub emails them. Their next `grandma` prints one line saying a share
+   is waiting, and `grandma knit pull` accepts the invitation and turns the share into a
+   normal memory proposal, reviewed with `grandma review` like anything else grandma
+   drafts. Think git, but for the context in your heads instead of the code on disk.
+
+   What "personal scope stripped" means, concretely: only that one project's memory
+   travels, never your sweater's memory and never global. Inside the project file, a line
+   goes if it carries your name, an address, something that looks like a credential, a
+   term from your `denylist.txt`, or a `<!-- private -->` marker. Absolute home paths come
+   out as `~`. Anything between `<!-- knit:private -->` and `<!-- /knit:private -->` is
+   dropped whole. You still see the payload before it moves, because a strip you cannot
+   read is a strip you cannot trust.
+
+   Honest about the security level: a share is personal-stripped, non-secret project
+   memory, and the boundary is the private repo's access list. Nothing is encrypted. Do
+   not knit anything you would not paste into that teammate's inbox. Also note the two
+   people on a project repo can see each other's shares of it, which is the point for
+   teammates and the wrong tool for a one-off handover. For that, and for anyone not on
+   GitHub, `--file` writes the same bundle to disk and `grandma knit pull --file` reads
+   it back.
+
+   You do not have to remember anyone's GitHub handle. The first time you share with
+   someone, grandma offers to save them under a name you pick, and after that
+   `--to Priyansh` is enough. `grandma knit contacts` shows the book, which lives with the
+   rest of knit's local scratch and never becomes memory. You can point `--to` at a handle, a
+   saved name, or an email. An email you have saved against a contact resolves instantly; an
+   email grandma has not seen is looked up on GitHub, which only works when that person made
+   their address public on their profile. When it cannot match one, it says so and tells you
+   to add the handle once. The handle is the part an invite actually needs, because GitHub's
+   collaborator API takes a username and has no way to accept an address.
+
+   You find out three ways, and you choose how much to opt into. A line when you next open
+   grandma, a desktop notification when a share turns up (once per share, not once per
+   check), and if you want it immediate, `grandma knit install-agent` checks every 60
+   seconds in the background. That last one is affordable because the check is a conditional
+   request and GitHub does not charge for a "nothing changed" answer, so the quiet case costs
+   nothing. Installing verifies that the job can actually run and tells you if it cannot,
+   rather than claiming success and going silent.
+
+   No grandma server and no grandma account, still. The transport is your own GitHub
+   through the `gh` CLI you already log into. If you have not got it, knit explains why it
+   needs it and offers to install it. The launch check never waits on the network:
+   it prints from a cache that a detached, lock-guarded, time-capped poll refreshes, and a
+   failed call leaves the old cache alone rather than claiming nothing is waiting. Silence
+   it with `GRANDMA_NO_KNIT_CHECK=1`.
+
+   Still open for design, and where contributions land best: merging when the two memories
+   disagree (v1 hands the conflict to you in review rather than resolving it), keeping a
+   share in sync as both sides learn more, and how much of a note's origin should survive
+   the merge. The [knit design discussion](https://github.com/anshulforyou/grandma/discussions/14)
+   is the place for it.
 
 ## Roadmap
 
-- **grandma knit: share a project's memory with your team (see above)**
+- **Knit round two: two-way sync, and a real merge when two memories disagree (see above)**
 - Adapters beyond Claude Code (Cursor, Codex CLI, aider)
 - Community sweater templates (share your best sweater setups)
 - Memory rollup (old logs compress instead of growing)

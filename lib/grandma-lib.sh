@@ -245,7 +245,7 @@ scope_name_is_reserved() {
   q="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   [[ -n "$q" ]] || return 0
   case "$q" in
-    init|save|review|search|ingest|watch|test|doctor|completions|update|version|help) return 0 ;;
+    init|save|review|search|ingest|watch|knit|test|doctor|completions|update|version|help) return 0 ;;
     global|proposals|watches|templates) return 0 ;;
   esac
   return 1
@@ -377,6 +377,55 @@ grandma_update_notice() {
   printf '  🧶 your grandma engine is %s days old — run: grandma update\n' "$days" >&2
 }
 
+# ---- knit: the shared-memory launch banner ----
+# A teammate sharing their project memory shows up as a GitHub repo invitation. Checking for
+# one means a network call, and launch must never wait on the network — so the launcher reads
+# a CACHE and, when that cache has gone stale, kicks off a detached refresh for NEXT time.
+# Same shape as the watch tick: print instantly from disk, refresh in the background.
+# Silence it entirely with GRANDMA_NO_KNIT_CHECK=1; tune with GRANDMA_KNIT_POLL_HOURS.
+
+knit_pending_file() { printf '%s/.knit-pending' "$ROOT"; }
+knit_checked_file() { printf '%s/.knit-checked' "$ROOT"; }
+
+# grandma_knit_notice — one line per waiting share, then a background refresh if the cache is
+# stale. Always returns 0: no gh, no network and no memory home are all normal states here.
+grandma_knit_notice() {
+  [[ "${GRANDMA_NO_KNIT_CHECK:-0}" == "1" ]] && return 0
+  local pf cf line now last age
+  pf="$(knit_pending_file)"
+  if [[ -s "$pf" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && printf '  🧶 %s — pull it: grandma knit pull\n' "$line" >&2
+    done < "$pf"
+  fi
+  command -v gh >/dev/null 2>&1 || return 0
+  now="$(date +%s 2>/dev/null | tr -cd '0-9')"; [[ -n "$now" ]] || return 0
+  age=$(( ${GRANDMA_KNIT_POLL_HOURS:-8} * 3600 ))
+  cf="$(knit_checked_file)"
+  if [[ -f "$cf" ]]; then
+    last="$(head -n1 "$cf" 2>/dev/null | tr -cd '0-9')"
+    [[ -n "$last" && $((now - last)) -lt "$age" ]] 2>/dev/null && return 0
+    nohup "$ENGINE/lib/grandma-knit.sh" poll >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    return 0
+  fi
+
+  # FIRST check ever on this machine: poll in the foreground, tightly capped, so someone who
+  # was just invited sees it on this launch instead of the next one. Backgrounding it means
+  # the cache is written after the banner has already been read, so the very launch that
+  # matters most to a new recipient is the one that shows nothing. Every later check goes
+  # back to the background. The cap is small and it fails open, so a dead network costs a
+  # couple of seconds once, not a hung prompt.
+  GRANDMA_KNIT_POLL_TIMEOUT="${GRANDMA_KNIT_FIRST_POLL_TIMEOUT:-5}" \
+    "$ENGINE/lib/grandma-knit.sh" poll >/dev/null 2>&1 || true
+  if [[ -s "$pf" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && printf '  🧶 %s — pull it: grandma knit pull\n' "$line" >&2
+    done < "$pf"
+  fi
+  return 0
+}
+
 # ---- portability helpers (BSD/macOS vs GNU/Linux) ----
 # GNU form (-c) FIRST: on Linux it succeeds cleanly; on macOS it fails with no stdout, so
 # the BSD (-f) fallback runs. The reverse order is unsafe — GNU parses `stat -f %m FILE` as
@@ -387,25 +436,43 @@ file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || ech
 file_size()  { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo 0; }
 epoch_date() { date -r "$1" '+%Y-%m-%d' 2>/dev/null || date -d "@$1" '+%Y-%m-%d' 2>/dev/null || echo "$1"; }
 notify_user() {
-  # title, body — macOS notification, Linux notify-send, else log-and-skip.
-  # Returns 0 if a backend delivered, 1 if none did (and logs why). A detached watch
-  # tick has no terminal, so failures must land in a file to be verifiable, not /dev/null.
+  # title, body, [command] — a desktop notification, and what to run about it.
+  #
+  # The third argument is the point. A notification you cannot act on is worse than none:
+  # `osascript display notification` is attributed to Script Editor and carries NO click
+  # action at all, so clicking one opens Script Editor's empty open-file panel, which reads
+  # as grandma being broken. That cannot be fixed by any argument to osascript.
+  #
+  # So: when terminal-notifier is present, use it, because it can actually run something on
+  # click. Otherwise fall back to osascript and put the command IN THE BODY, so the
+  # notification is self-sufficient and there is no reason to click it.
+  #
+  # Returns 0 if a backend delivered, 1 if none did (and logs why). A detached watch tick has
+  # no terminal, so failures must land in a file to be verifiable, not /dev/null.
   local root="${GRANDMA_HOME:-$HOME/.grandma}" log="${GRANDMA_HOME:-$HOME/.grandma}/.distill/notify.log" err
+  local title="$1" body="$2" cmd="${3:-}"
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    if terminal-notifier -title "$title" -message "$body" -sound Glass \
+         ${cmd:+-execute "$cmd"} >/dev/null 2>&1; then return 0; fi
+  fi
   if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display notification \"$2\" with title \"$1\" sound name \"Glass\"" 2>/dev/null && return 0
+    local shown="$body"
+    [[ -n "$cmd" ]] && shown="$body — run: $cmd"
+    osascript -e "display notification \"${shown//\"/\\\"}\" with title \"$title\" sound name \"Glass\"" 2>/dev/null && return 0
   fi
   if command -v notify-send >/dev/null 2>&1; then
     # A backgrounded/nohup'd tick can inherit a shell with no session bus (SSH, tty, cron).
     # notify-send then fails "cannot connect to bus". Derive it from the runtime dir if we can.
     [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "${XDG_RUNTIME_DIR:-}/bus" ]] \
       && export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
-    if err="$(notify-send -a grandma "$1" "$2" 2>&1)"; then return 0; fi
+    local lbody="$body"; [[ -n "$cmd" ]] && lbody="$body — run: $cmd"
+    if err="$(notify-send -a grandma "$title" "$lbody" 2>&1)"; then return 0; fi
     mkdir -p "$root/.distill" 2>/dev/null
     printf '%s notify-send failed: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$err" >> "$log" 2>/dev/null
     return 1
   fi
   mkdir -p "$root/.distill" 2>/dev/null
   printf '%s no notifier (install libnotify-bin / libnotify): [%s] %s\n' \
-    "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" "$2" >> "$log" 2>/dev/null
+    "$(date '+%Y-%m-%dT%H:%M:%S')" "$title" "$body" >> "$log" 2>/dev/null
   return 1
 }
