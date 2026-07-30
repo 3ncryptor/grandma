@@ -8,6 +8,11 @@
 : "${FAILS:=0}"
 : "${TESTS:=0}"
 
+# `git bisect run ./test/run.sh` and `git rebase --exec` export these, and they win over `git -C`:
+# every git command in the suite would then act on the CALLER's repository. The tests switch
+# branches, stash, and commit, so that is a working tree we could damage. Clear them once, here.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 ok()      { TESTS=$((TESTS + 1)); printf '  \033[32mok\033[0m   %s\n' "$1"; }
 fail()    { TESTS=$((TESTS + 1)); FAILS=$((FAILS + 1)); printf '  \033[31mFAIL\033[0m %s\n' "$1"
             [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         | /'; return 0; }

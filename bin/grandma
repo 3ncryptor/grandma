@@ -18,7 +18,7 @@
 #   grandma test [sweater]             verify the context-integrity invariants
 #   grandma doctor                     check dependencies and memory-home health
 #   grandma completions <bash|zsh|fish> print the shell tab-completion script
-#   grandma update                     fast-forward the engine to the latest master
+#   grandma update [--force]           move the engine to the latest master (--force stashes)
 #   grandma version                    print the running engine version
 #   grandma help                       this text
 #

@@ -69,12 +69,15 @@ Requirements: [Claude Code](https://claude.com/claude-code), git, jq, python3. m
 
 ## Update
 
-The engine is a git checkout, so updating is a fast-forward pull:
+The engine is a git checkout, so updating is a fast-forward:
 
 ```sh
-grandma update          # pull the latest engine, then show what changed
+grandma update          # land on the latest master, then show what changed
+grandma update --force  # same, but stash local engine edits first
 grandma version         # what you are running right now
 ```
+
+Update always lands you on `master`, whichever branch the engine checkout is on, and it only ever fast-forwards: no force, no rewritten history. If you have been hacking on the engine, uncommitted changes to tracked files stop it with a list of what it found, and `--force` stashes those for you and prints the command to get them back. Untracked scratch files are left where they are. It also stops rather than guess when the situation is ambiguous: a local `master` with commits of its own, a branch another worktree has checked out, a detached HEAD holding work nothing points at, or an engine directory that turns out to be inside some other git repository.
 
 grandma tracks `master` (a rolling release). It never phones home: instead of checking a server, it prints one quiet line at launch when your engine has gone stale (more than a week since your last `grandma update`), nudging you to run it. Silence that with `GRANDMA_NO_UPDATE_CHECK=1`, or tune the window with `GRANDMA_UPDATE_STALE_DAYS`. Re-running the installer updates in place too.
 
@@ -183,7 +186,7 @@ Eight recipes with real transcripts in [docs/use-cases.md](docs/use-cases.md):
 
 ## Trust
 
-- **15 tested invariants** guard the core promise: loading sweater X injects exactly global + X and nothing else, only a real sweater can be loaded at all, the engine contains no sweater jargon and no personal data, no secrets in memory, hooks cannot recurse or run away, and a shared memory cannot leave without being stripped and shown to you. The suite gates every commit and runs in CI on macOS and Linux.
+- **16 tested invariants** guard the core promise: loading sweater X injects exactly global + X and nothing else, only a real sweater can be loaded at all, the engine contains no sweater jargon and no personal data, no secrets in memory, hooks cannot recurse or run away, and a shared memory cannot leave without being stripped and shown to you. The suite gates every commit and runs in CI on macOS and Linux.
 - **No telemetry, no server, no accounts.** Your memory never leaves your machine.
 - Failure modes are documented, not hidden: [docs/architecture.md](docs/architecture.md) includes the war stories, like the day a hook recursion produced 4,718 files before the circuit breaker existed.
 

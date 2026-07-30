@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Fixed: `grandma update` now always lands the engine on `master`, whatever branch the checkout
+  is on. It used to pull the current branch, which meant two ways to lose. On a branch whose
+  remote had been deleted (the normal end of a merged pull request) it failed with git's
+  "no such ref was fetched" and then blamed local changes that were not there. On a branch that
+  still existed it was worse: exit 0, "already up to date", while master had moved on. Update
+  now fetches, resolves the branch grandma tracks from the remote itself, and fast-forwards onto
+  it in one operation. Uncommitted changes to tracked files stop it and get listed instead of being
+  carried along or dropped, and `grandma update --force` stashes them and prints how to get them
+  back. It also refuses rather than doing damage in four cases it used to walk straight into: a local
+  `master` holding commits of its own (update never rewrites history), an engine copy sitting inside
+  someone else's repository (git looks upward, so it would have rearranged that working tree), a
+  branch already checked out in another worktree (`checkout -B` does not honour git's own guard), and
+  a detached HEAD carrying commits that nothing else points at. Re-running the installer now goes
+  through the same command instead of its own raw pull.
 - New mascot art, rebuilt from a high-resolution source, and now with a **transparent
   background** instead of a baked-in one. The README header reads correctly in GitHub light
   and dark with no `<picture>` element and no second file, because there is no background to

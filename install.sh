@@ -6,8 +6,10 @@ DEST="${GRANDMA_ENGINE:-$HOME/.grandma-engine}"
 
 command -v git >/dev/null 2>&1 || { echo "git is required"; exit 1; }
 if [[ -d "$DEST/.git" ]]; then
-  echo "updating grandma engine in $DEST"
-  git -C "$DEST" pull --ff-only
+  # `grandma update`, not a raw pull: it lands on the tracked branch even when this checkout sits on
+  # some other one, and it refuses instead of trampling local work. A refusal is not fatal here,
+  # since init below is still worth running against the engine as it stands.
+  "$DEST/bin/grandma" update || echo "  the engine was left as it is. Fix the above, then run: grandma update"
 else
   echo "installing grandma engine to $DEST"
   git clone --depth 1 "$REPO" "$DEST"
