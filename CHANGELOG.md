@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: accepting the launch-time offer to review a previous session no longer hangs. It printed
+  "opening review" and then waited forever, silently, on any memory home containing a directory
+  with no markdown files in it. Review turns on `nullglob` before resolving the sweater, which
+  collapsed a glob inside the scope listing to nothing and left `grep` with no file to read, so it
+  read the terminal instead. Every glob passed to grep is now backed by `/dev/null`, a test pins the
+  path the launcher actually takes, and a new invariant flags the shape in engine source.
 - Fixed: `grandma update` now always lands the engine on `master`, whatever branch the checkout
   is on. It used to pull the current branch, which meant two ways to lose. On a branch whose
   remote had been deleted (the normal end of a merged pull request) it failed with git's

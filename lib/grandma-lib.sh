@@ -306,7 +306,10 @@ list_scopes() {
     # memory. A proposal carries scope: frontmatter, so the filter below would otherwise
     # enumerate proposals/ as a scope the moment one exists (and trip the core-purity check).
     case "$n" in global|proposals|watches|.distill) continue ;; esac
-    if grep -lqE '^scope:' "$d"/*.md 2>/dev/null; then echo "$n"; fi
+    # /dev/null is a deliberate extra operand, not clutter: a caller may have `shopt -s nullglob`
+    # set (grandma-review does), and then a media-only directory expands the glob to NOTHING, grep
+    # falls back to stdin, and the whole CLI hangs on the terminal with no output at all.
+    if grep -lqE '^scope:' "$d"/*.md /dev/null 2>/dev/null; then echo "$n"; fi
   done
 }
 

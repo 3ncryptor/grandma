@@ -136,7 +136,7 @@ session does not degrade into an agent that forgot who you are.
 
 ## The integrity suite
 
-`grandma test` verifies fifteen invariants. The interesting ones:
+`grandma test` verifies sixteen invariants. The interesting ones:
 
 1. **Isolation.** Every sweater's assembled bundle contains only `global/` and that
    sweater. Nothing else, in any load mode.
@@ -148,6 +148,10 @@ session does not degrade into an agent that forgot who you are.
    transcript path must exist. These three each correspond to a real incident (below).
 5. **Knit guards.** Sharing cannot lose its strip, its poll lock, its network cap, or its
    opt-out, and the launch banner has to stay wired to the launcher.
+6. **No accidental stdin reads.** A `grep` whose file operand is a path glob must also be
+   handed `/dev/null`. A glob that matches nothing leaves grep with no file at all, so it
+   reads stdin, and on a terminal the CLI hangs with no output. That one shipped (below).
+   The check only knows the common shape, so the guarantee rests on the behavioural test.
 
 The suite runs as a git pre-commit gate on the engine and in CI on macOS and Linux.
 
@@ -198,6 +202,17 @@ launchd agent for daily background analysis. macOS TCC silently blocks launchd f
 reading `~/Documents`, so it failed with "Operation not permitted" on the first real
 machine. Watches now tick opportunistically at every grandma launch, which needs no
 permissions at all, and the launchd path is optional and honestly documented.
+
+**The review that hung on nothing.** Accepting the launch-time offer to review a
+previous session printed "opening review" and then sat there forever. No output, no
+error, nothing to interrupt but the whole command. `grandma review` turns on
+`shopt -s nullglob` before it resolves the sweater, so on a memory home holding a
+directory with no markdown in it (a folder of mascot art, in the real case) the glob
+inside `list_scopes` expanded to nothing at all. That left `grep -lqE` with no file to
+read, and it did what grep does with no file: read stdin, from the terminal, until the
+end of time. `-q` is why it never printed a character while it waited. Every glob handed
+to grep now carries `/dev/null` behind it, a test drives the exact path the launcher
+execs, and invariant 16 flags the shape in engine source.
 
 ## Costs, honestly
 

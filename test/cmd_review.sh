@@ -61,5 +61,61 @@ capture env "$GBIN" review --clear
 assert_rc 0 "review --clear on empty runs"
 assert_contains "no proposals to clear" "reports nothing to clear"
 
+# ---- the nullglob stdin hang. Found live: `grandma <sweater>` offered to review a previous
+# session, printed "opening review", and then sat there forever with no output and no way to tell
+# why. review sets `shopt -s nullglob` before resolving the scope, and list_scopes globbed a
+# media-only directory (assets/) down to NOTHING, which left `grep -lqE '^scope:'` with no file
+# operand, so grep read stdin and blocked on the terminal.
+#
+# Reproduced without a pty: stdin is a fifo whose writer stays alive and never sends a byte, which is
+# what a terminal looks like to a blocking read. Three details are load-bearing. The writer must
+# outlive the cap, or the read stops blocking before the cap can judge it. It must not outlive it by
+# much, because the blocked grep survives the capped parent and holds the capture pipe until the
+# writer goes, so 8s against a 5s cap keeps a red run near 8s instead of a minute. And the writer is
+# detached with its own output pointed away from ours: a plain `< <(sleep 8)` leaves a subshell
+# holding this suite's stderr, which stalls anything reading the suite's log to EOF (CI does).
+#
+# Two sweater-less directories on purpose, one either side of the sweater alphabetically. Scope
+# resolution stops reading list_scopes the moment the name it wants arrives, so a directory sorting
+# after the sweater is never reached: with only a late one, the pre-fix code never hangs and this
+# test would pass against the bug. `assets` is the real-world case, `zz-media` proves the guard is
+# not just an artefact of sort order.
+BLOCK="$TMP/block.fifo"; mkfifo "$BLOCK"
+hold_stdin() { ( sleep 8 > "$BLOCK" 2>/dev/null & ) ; }   # one writer per case, then it lets go
+
+mkdir -p "$GRANDMA_HOME/assets" "$GRANDMA_HOME/zz-media"
+printf 'not markdown\n' > "$GRANDMA_HOME/assets/mascot.gif"
+printf 'not markdown\n' > "$GRANDMA_HOME/zz-media/splash.gif"
+{ echo "# grandma memory proposal"; echo "# scope=home-ops  transcript=abc123"; echo
+  echo "target: home-ops/facts.md | action: append | text: recycling is biweekly"
+} > "$PROP"   # --clear above emptied the queue; --apply needs something pending
+
+section "list_scopes — a media-only directory does not send grep to stdin (nullglob-safe)"
+hold_stdin
+capture_capped 5 env GRANDMA_HOME="$GRANDMA_HOME" bash -c '
+  set -uo pipefail; shopt -s nullglob
+  ENGINE="'"$ENGINE"'"; ROOT="'"$GRANDMA_HOME"'"
+  . "$ENGINE/lib/grandma-lib.sh"; list_scopes' < "$BLOCK"
+assert_rc 0 "list_scopes returns under nullglob instead of blocking on stdin"
+assert_contains "home-ops" "and still finds the real sweaters"
+assert_not_contains "assets" "while leaving the media-only directory out"
+
+section "review --apply <scope> — the path the launcher execs does not hang"
+# The real symptom, not the dry run: `grandma <sweater>` execs exactly this when you accept the
+# review offer, and it has to get all the way to launching the session. `claude` is stubbed with
+# something that exits without touching stdin (the shared fake_claude drains stdin, which would
+# swallow the very block we are testing for).
+mkdir -p "$TMP/bin"; printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/claude"; chmod +x "$TMP/bin/claude"
+hold_stdin
+capture_capped 5 env PATH="$TMP/bin:$PATH" GRANDMA_HOME="$GRANDMA_HOME" \
+  "$GBIN" review --apply home-ops < "$BLOCK"
+assert_rc 0 "review --apply reaches the review session instead of hanging on the terminal"
+
+section "review --apply <scope> dry-run — same resolution, still no hang"
+hold_stdin
+capture_capped 5 env GRANDMA_DRY_RUN=1 "$GBIN" review --apply home-ops < "$BLOCK"
+assert_rc 0 "the dry-run path resolves too"
+assert_contains "scope=home-ops" "and still resolves the kebab scope"
+
 echo
 if [ "$FAILS" -eq 0 ]; then echo "cmd_review: PASS"; else echo "cmd_review: $FAILS FAILURE(S)"; exit 1; fi

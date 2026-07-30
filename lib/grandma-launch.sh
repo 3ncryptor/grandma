@@ -516,7 +516,8 @@ for _sd in "$ROOT"/watches/*/; do
     printf '  📊 grandma finished watching: %s — read it: grandma-watch report %s\n' "$(basename "$_sd")" "$(basename "$_sd")" >&2
 done
 if compgen -G "$ROOT/watches/*/watch.json" >/dev/null 2>&1; then
-  if grep -l '"status": "active"' "$ROOT"/watches/*/watch.json >/dev/null 2>&1; then
+  # /dev/null keeps grep off stdin when the glob matches nothing (see list_scopes for the hang).
+  if grep -l '"status": "active"' "$ROOT"/watches/*/watch.json /dev/null >/dev/null 2>&1; then
     nohup "$ENGINE/lib/grandma-watch.sh" tick >/dev/null 2>&1 &
     disown 2>/dev/null || true
   fi

@@ -232,6 +232,40 @@ if [[ "$HOME_OK" == "1" && -d "$ROOT/.knit" ]]; then
 fi
 [[ "$kn_ok" == "1" ]] && pass "knit guarded (strip, lock, bounded poll, opt-out, wired, gitignored)"
 
+# ---- 16. No grep can fall back to stdin: every glob operand is backed by /dev/null ----
+# A glob is not guaranteed to match. With `shopt -s nullglob` set anywhere up the call stack it
+# expands to nothing, and a grep with no file operand reads STDIN — which on a terminal means the
+# whole CLI hangs, printing nothing, with no clue why. That shipped: the launch-time review offer
+# went silent forever on any memory home holding a directory without .md files. A /dev/null operand
+# (not the `2>/dev/null` redirect, which is why the redirects are stripped before looking) makes the
+# operand list non-empty in every case.
+# This is a lint, and it only claims the common form: a grep whose file operand is a glob rooted in a
+# variable ("$dir"/*.md), which is how every path glob in this engine is written. Anchoring on the
+# variable is what keeps it off a grep whose PATTERN happens to contain /* — flagging that would be a
+# false alarm in a pre-commit hook, which is the way this kind of check usually does more harm than
+# good. It therefore does NOT see a bare glob (grep x *.md), a second grep later on the same line, or
+# the same stdin fallback in cat or awk. There are none of those today, and the behavioural test in
+# test/cmd_review.sh is what actually pins the hang. Comment lines are skipped, and a /dev/null that
+# appears only in a comment does not count, because a note must not be able to silence the check.
+echo "== 16. no grep reads stdin by accident (glob operands are /dev/null-backed) =="
+gs_ok=1
+for f in "$ENGINE"/lib/*.sh "$ENGINE/bin/grandma" "$ENGINE/hooks/pre-commit" "$ENGINE/install.sh"; do
+  [[ -f "$f" ]] || continue
+  while IFS= read -r line; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"        # leading blanks off (the grep -n prefix stays)
+    case "${trimmed#*:}" in [\#]*) continue ;; esac   # a commented-out example is not shipped logic
+    code="${line%%#*}"                                # a trailing comment is not code either
+    # the glob has to still be in the code, not only in the comment we just cut
+    printf '%s' "$code" | grep -qE '\$[^[:space:]]*/"?\*' || continue
+    case "$(printf '%s' "$code" | sed 's/[0-9]*>&*[[:space:]]*\/dev\/null//g')" in
+      *'/dev/null'*) continue ;;                      # a real operand, not the 2>/dev/null redirect
+    esac
+    bad "$(basename "$f"): grep with an unbacked glob operand can read stdin and hang: $trimmed"
+    gs_ok=0
+  done < <(grep -nE 'grep' "$f" 2>/dev/null | grep -E '\$[^[:space:]]*/"?\*' || true)
+done
+[[ "$gs_ok" == "1" ]] && pass "every grep glob operand is backed by /dev/null (cannot fall back to stdin)"
+
 echo
 if [[ "$fail" == "0" ]]; then echo "grandma-test: ALL PASS"; else echo "grandma-test: FAILURES ABOVE"; fi
 exit "$fail"
